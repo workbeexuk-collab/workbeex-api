@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # NestJS Backend (Development)
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: nextbee-api-dev
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nextbee
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - nextbee-dev
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: nextbee-postgres-dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nextbee
+    volumes:
+      - postgres_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - nextbee-dev
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: nextbee-redis-dev
+    ports:
+      - "6379:6379"
+    networks:
+      - nextbee-dev
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    container_name: nextbee-minio-dev
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_dev:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - nextbee-dev
+
+  # Prisma Studio
+  prisma-studio:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: nextbee-prisma-studio
+    command: npx prisma studio
+    env_file:
+      - .env.development
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nextbee
+    ports:
+      - "5555:5555"
+    depends_on:
+      - postgres
+    networks:
+      - nextbee-dev
+
+volumes:
+  postgres_dev:
+  minio_dev:
+
+networks:
+  nextbee-dev:
+    driver: bridge
