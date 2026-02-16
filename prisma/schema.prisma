@@ -834,6 +834,15 @@ model PromotionTranslation {
   @@unique([promotionId, language])
 }
 
+// ==================== APP CONFIG ====================
+
+model AppConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // Platform-wide stats cache (updated periodically)
 model PlatformStats {
   id                String   @id @default(cuid())

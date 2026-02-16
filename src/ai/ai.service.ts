@@ -5,7 +5,8 @@ import { AIResponseDto, ServiceIntentResponseDto } from './dto/chat.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { v4 as uuidv4 } from 'uuid';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+const DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY_MESSAGES = 10;
 
@@ -167,6 +168,7 @@ export class AiService {
   private sessions: Map<string, ConversationSession> = new Map();
   private cachedRegions: string[] = [];
   private regionsCacheTime: Date | null = null;
+  private cachedModel: { value: string; expiresAt: number } | null = null;
 
   constructor(
     private configService: ConfigService,
@@ -175,6 +177,86 @@ export class AiService {
     this.apiKey = this.configService.get<string>('GEMINI_API_KEY') || '';
     if (this.apiKey) {
       this.genAI = new GoogleGenAI({ apiKey: this.apiKey });
+    }
+  }
+
+  private async getAiModel(): Promise<string> {
+    if (this.cachedModel && Date.now() < this.cachedModel.expiresAt) {
+      return this.cachedModel.value;
+    }
+
+    try {
+      const config = await this.prisma.appConfig.findUnique({
+        where: { key: 'ai_model' },
+      });
+
+      const model = config?.value || DEFAULT_AI_MODEL;
+      this.cachedModel = { value: model, expiresAt: Date.now() + 10 * 60 * 1000 };
+      this.logger.log(`AI model loaded: ${model}`);
+      return model;
+    } catch (error) {
+      this.logger.error('Error loading AI model config:', error);
+      return DEFAULT_AI_MODEL;
+    }
+  }
+
+  private async getGeminiApiUrl(): Promise<string> {
+    const model = await this.getAiModel();
+    return `${GEMINI_API_BASE}/${model}:generateContent`;
+  }
+
+  private async fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 2): Promise<Response> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const response = await fetch(url, options);
+      if (response.status === 503 && attempt < maxRetries) {
+        this.logger.warn(`Gemini API 503, retrying (${attempt + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+      return response;
+    }
+    // Unreachable, but TypeScript needs it
+    throw new Error('fetchWithRetry: exhausted retries');
+  }
+
+  private safeJsonParse(text: string): any {
+    try {
+      return JSON.parse(text);
+    } catch {
+      this.logger.warn('JSON parse failed, attempting recovery...');
+      // Try to fix truncated JSON by adding missing closing braces/brackets
+      let fixed = text.trim();
+      // Remove trailing comma if present
+      fixed = fixed.replace(/,\s*$/, '');
+      // Count unmatched braces and brackets
+      let braces = 0;
+      let brackets = 0;
+      let inString = false;
+      let escape = false;
+      for (const ch of fixed) {
+        if (escape) { escape = false; continue; }
+        if (ch === '\\') { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') braces++;
+        else if (ch === '}') braces--;
+        else if (ch === '[') brackets++;
+        else if (ch === ']') brackets--;
+      }
+      // Close any open strings
+      if (inString) fixed += '"';
+      // Add missing closings
+      for (let i = 0; i < brackets; i++) fixed += ']';
+      for (let i = 0; i < braces; i++) fixed += '}';
+
+      try {
+        const result = JSON.parse(fixed);
+        this.logger.log('JSON recovery succeeded');
+        return result;
+      } catch {
+        this.logger.error('JSON recovery also failed');
+        throw new Error('Failed to parse AI response as JSON');
+      }
     }
   }
 
@@ -389,7 +471,8 @@ export class AiService {
       this.logger.log(`Conversation history: ${trimmedHistory.length}/${conversationHistory.length} messages`);
       this.logger.log(`Session context: ${sessionContext}`);
 
-      const response = await fetch(`${GEMINI_API_URL}?key=${this.apiKey}`, {
+      const geminiApiUrl = await this.getGeminiApiUrl();
+      const response = await this.fetchWithRetry(`${geminiApiUrl}?key=${this.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -418,7 +501,7 @@ export class AiService {
 
       this.logger.log(`AI Response: ${text.substring(0, 300)}...`);
 
-      const parsed = JSON.parse(text);
+      const parsed = this.safeJsonParse(text);
 
       // Fallback: serviceKey null ama intent find_service ise mesajdan çıkar
       if (!parsed.serviceKey && parsed.intent === 'find_service') {
@@ -824,7 +907,8 @@ Respond in JSON format:
         },
       };
 
-      const response = await fetch(`${GEMINI_API_URL}?key=${this.apiKey}`, {
+      const geminiApiUrl = await this.getGeminiApiUrl();
+      const response = await this.fetchWithRetry(`${geminiApiUrl}?key=${this.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -850,7 +934,7 @@ Respond in JSON format:
       }
 
       this.logger.log(`Vision Result: ${text.substring(0, 200)}...`);
-      const parsed = JSON.parse(text);
+      const parsed = this.safeJsonParse(text);
 
       return {
         serviceType: parsed.serviceType || null,
@@ -902,7 +986,8 @@ Respond in JSON format:
         },
       };
 
-      const response = await fetch(`${GEMINI_API_URL}?key=${this.apiKey}`, {
+      const geminiApiUrl = await this.getGeminiApiUrl();
+      const response = await this.fetchWithRetry(`${geminiApiUrl}?key=${this.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -999,7 +1084,8 @@ Respond in JSON format:
         },
       };
 
-      const response = await fetch(`${GEMINI_API_URL}?key=${this.apiKey}`, {
+      const geminiApiUrl = await this.getGeminiApiUrl();
+      const response = await this.fetchWithRetry(`${geminiApiUrl}?key=${this.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -1026,7 +1112,7 @@ Respond in JSON format:
 
       this.logger.log(`CV Chat Response: ${text.substring(0, 200)}...`);
 
-      const parsed = JSON.parse(text);
+      const parsed = this.safeJsonParse(text);
       return {
         response: parsed.response || (locale === 'tr' ? 'Anlıyorum, devam edelim.' : 'Got it, let\'s continue.'),
         extractedData: parsed.extractedData || null,
