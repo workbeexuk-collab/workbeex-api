@@ -10,26 +10,36 @@ datasource db {
 // ==================== USER & AUTH ====================
 
 model User {
-  id                String     @id @default(cuid())
-  email             String     @unique
-  passwordHash      String?
-  firstName         String
-  lastName          String
-  phone             String?
-  avatar            String?
-  type              UserType   @default(CUSTOMER)
-  status            UserStatus @default(ACTIVE)
-  emailVerified     Boolean    @default(false)
-  emailVerifiedAt   DateTime?
-  phoneVerified     Boolean    @default(false)
-  phoneVerifiedAt   DateTime?
-  preferredLanguage String     @default("en")
-  timezone          String     @default("UTC")
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  id                 String     @id @default(cuid())
+  email              String     @unique
+  passwordHash       String?
+  firstName          String
+  lastName           String
+  phone              String?
+  postcode           String?    // UK postcode for location matching
+  avatar             String?
+  type               UserType   @default(CUSTOMER)
+  status             UserStatus @default(ACTIVE)
+  emailVerified      Boolean    @default(false)
+  emailVerifiedAt    DateTime?
+  phoneVerified      Boolean    @default(false)
+  phoneVerifiedAt    DateTime?
+  phoneIsVoip        Boolean?   // True if phone is VOIP (less trusted)
+  addressVerified    Boolean    @default(false)
+  addressVerifiedAt  DateTime?
+  socialTrustScore   Int        @default(0)  // 0-100 based on social accounts
+  overallTrustScore  Int        @default(0)  // 0-100 combined trust score
+  preferredLanguage  String     @default("en")
+  timezone           String     @default("UTC")
+  registrationStep   Int        @default(1)  // Track onboarding progress
+  onboardingComplete Boolean    @default(false)
+  balance            Decimal    @default(0) @db.Decimal(10, 2)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 
   // Relations
   provider                  Provider?
+  balanceTransactions       BalanceTransaction[]
   socialAccounts            SocialAccount[]
   refreshTokens             RefreshToken[]
   passwordResets            PasswordReset[]
@@ -42,6 +52,9 @@ model User {
   quoteRequests             QuoteRequest[]
   helpfulVotes              ReviewHelpful[]
   deviceTokens              DeviceToken[]
+  favorites                 Favorite[]
+  employerJobs              Job[]                       @relation("EmployerJobs")
+  candidateProfile          CandidateProfile?
 
   @@index([email])
   @@index([type])
@@ -61,15 +74,24 @@ enum UserStatus {
 }
 
 model SocialAccount {
-  id           String         @id @default(cuid())
-  userId       String
-  provider     SocialProvider
-  providerId   String
-  accessToken  String?
-  refreshToken String?
-  expiresAt    DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id              String         @id @default(cuid())
+  userId          String
+  provider        SocialProvider
+  providerId      String
+  email           String?        // Email from social provider
+  name            String?        // Name from social provider
+  picture         String?        // Profile picture URL
+  accessToken     String?
+  refreshToken    String?
+  expiresAt       DateTime?
+  // Trust scoring metadata
+  accountCreatedAt DateTime?     // When social account was created
+  isVerified       Boolean?      // If provider verified the account
+  followersCount   Int?          // For LinkedIn
+  connectionsCount Int?          // For LinkedIn
+  trustScore       Int           @default(0) // 0-100 trust score for this account
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -81,6 +103,61 @@ enum SocialProvider {
   GOOGLE
   FACEBOOK
   APPLE
+  LINKEDIN
+}
+
+// Phone verification codes
+model PhoneVerification {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  attempts  Int      @default(0)
+  verified  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@index([expiresAt])
+}
+
+// Email verification codes
+model EmailVerification {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  attempts  Int      @default(0)
+  verified  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// Address verification via postal mail
+model AddressVerification {
+  id           String                    @id @default(cuid())
+  userId       String
+  postcode     String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  code         String                    // Code sent via mail
+  status       AddressVerificationStatus @default(PENDING)
+  sentAt       DateTime?
+  verifiedAt   DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime                  @default(now())
+
+  @@index([userId])
+  @@index([code])
+}
+
+enum AddressVerificationStatus {
+  PENDING    // Not yet sent
+  SENT       // Mail sent
+  VERIFIED   // Code entered correctly
+  EXPIRED    // Code expired
 }
 
 model RefreshToken {
@@ -156,8 +233,10 @@ model Provider {
   availability       ProviderAvailability[]
   certifications     ProviderCertification[]
   verificationDocs   VerificationDocument[]
+  quoteRequests      QuoteRequest[]
   quotes             Quote[]
   bookingsAsProvider Booking[]               @relation("provider")
+  favoritedBy        Favorite[]
 
   @@index([verified])
   @@index([rating])
@@ -305,6 +384,7 @@ model ServiceTranslation {
 model QuoteRequest {
   id            String             @id @default(cuid())
   customerId    String
+  providerId    String             // Target provider for the quote request
   serviceId     String
   description   String             @db.Text
   location      String?
@@ -318,11 +398,13 @@ model QuoteRequest {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  service  Service @relation(fields: [serviceId], references: [id])
+  customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id])
   quotes   Quote[]
 
   @@index([customerId])
+  @@index([providerId])
   @@index([serviceId])
   @@index([status])
 }
@@ -361,6 +443,7 @@ enum QuoteStatus {
   ACCEPTED
   REJECTED
   EXPIRED
+  WITHDRAWN
 }
 
 model Booking {
@@ -453,6 +536,41 @@ model StripeEvent {
   @@index([processed])
 }
 
+// ==================== WALLET ====================
+
+model BalanceTransaction {
+  id              String                   @id @default(cuid())
+  userId          String
+  amount          Decimal                  @db.Decimal(10, 2)
+  type            BalanceTransactionType
+  status          BalanceTransactionStatus @default(PENDING)
+  stripeSessionId String?                  @unique
+  description     String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([stripeSessionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum BalanceTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  PAYMENT
+  REFUND
+}
+
+enum BalanceTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 // ==================== REVIEWS ====================
 
 model Review {
@@ -541,6 +659,7 @@ model Message {
 enum MessageType {
   TEXT
   IMAGE
+  FILE
   QUOTE
   BOOKING_UPDATE
   SYSTEM
@@ -606,6 +725,129 @@ enum DisputeStatus {
   ESCALATED
 }
 
+// ==================== CONTENT & PROMOTIONS ====================
+
+model Testimonial {
+  id         String   @id @default(cuid())
+  authorName String
+  authorAvatar String?
+  rating     Int      // 1-5
+  comment    String   @db.Text
+  service    String?  // Service name for badge
+  featured   Boolean  @default(false)
+  visible    Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  translations TestimonialTranslation[]
+
+  @@index([featured])
+  @@index([visible])
+}
+
+model TestimonialTranslation {
+  id            String @id @default(cuid())
+  testimonialId String
+  language      String // en, tr
+  comment       String @db.Text
+  service       String?
+
+  testimonial Testimonial @relation(fields: [testimonialId], references: [id], onDelete: Cascade)
+
+  @@unique([testimonialId, language])
+}
+
+model BlogPost {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  imageUrl     String
+  readTime     Int      // minutes
+  category     String   // tips, guide, news
+  featured     Boolean  @default(false)
+  published    Boolean  @default(false)
+  publishedAt  DateTime?
+  viewCount    Int      @default(0)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  translations BlogPostTranslation[]
+
+  @@index([slug])
+  @@index([featured])
+  @@index([published])
+}
+
+model BlogPostTranslation {
+  id          String  @id @default(cuid())
+  blogPostId  String
+  language    String  // en, tr
+  title       String
+  excerpt     String? @db.Text
+  content     String  @db.Text
+
+  blogPost BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+
+  @@unique([blogPostId, language])
+}
+
+model Promotion {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  type        PromotionType
+  value       Decimal   @db.Decimal(10, 2) // percentage or fixed amount
+  minOrder    Decimal?  @db.Decimal(10, 2)
+  maxDiscount Decimal?  @db.Decimal(10, 2) // for percentage type
+  usageLimit  Int?      // total usage limit
+  usageCount  Int       @default(0)
+  perUserLimit Int      @default(1)
+  featured    Boolean   @default(false)
+  active      Boolean   @default(true)
+  startDate   DateTime
+  endDate     DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  translations PromotionTranslation[]
+
+  @@index([code])
+  @@index([featured])
+  @@index([active])
+}
+
+enum PromotionType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+model PromotionTranslation {
+  id          String  @id @default(cuid())
+  promotionId String
+  language    String  // en, tr
+  title       String
+  description String?
+  tag         String? // e.g., "LIMITED OFFER"
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, language])
+}
+
+// Platform-wide stats cache (updated periodically)
+model PlatformStats {
+  id                String   @id @default(cuid())
+  key               String   @unique // 'main' for singleton
+  totalProviders    Int      @default(0)
+  verifiedProviders Int      @default(0)
+  totalJobs         Int      @default(0)
+  completedJobs     Int      @default(0)
+  totalReviews      Int      @default(0)
+  averageRating     Decimal  @default(0) @db.Decimal(3, 2)
+  totalCustomers    Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
 // ==================== ADMIN & ANALYTICS ====================
 
 model AdminAuditLog {
@@ -622,4 +864,254 @@ model AdminAuditLog {
   @@index([adminId])
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// ==================== FAVORITES ====================
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  providerId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, providerId])
+  @@index([userId])
+  @@index([providerId])
+}
+
+// ==================== JOB LISTINGS ====================
+
+model Job {
+  id              String        @id @default(cuid())
+  employerId      String
+  title           String
+  description     String        @db.Text
+  requirements    String?       @db.Text
+  responsibilities String?      @db.Text
+  location        String?
+  locationType    LocationType  @default(ONSITE)
+  employmentType  EmploymentType @default(FULL_TIME)
+  experienceLevel ExperienceLevel @default(MID)
+  salaryMin       Decimal?      @db.Decimal(10, 2)
+  salaryMax       Decimal?      @db.Decimal(10, 2)
+  salaryCurrency  String        @default("GBP")
+  salaryPeriod    SalaryPeriod  @default(YEARLY)
+  skills          String[]      // Required skills
+  benefits        String[]      // Job benefits
+  category        String?       // Job category
+  status          JobStatus     @default(ACTIVE)
+  applicationDeadline DateTime?
+  viewCount       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  employer     User             @relation("EmployerJobs", fields: [employerId], references: [id], onDelete: Cascade)
+  applications JobApplication[]
+
+  @@index([employerId])
+  @@index([status])
+  @@index([category])
+  @@index([locationType])
+  @@index([employmentType])
+  @@index([createdAt])
+}
+
+enum LocationType {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  FREELANCE
+  INTERNSHIP
+}
+
+enum ExperienceLevel {
+  ENTRY
+  MID
+  SENIOR
+  LEAD
+  EXECUTIVE
+}
+
+enum SalaryPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CLOSED
+  FILLED
+}
+
+// ==================== CANDIDATE PROFILES ====================
+
+model CandidateProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  headline        String?   // Professional headline
+  summary         String?   @db.Text
+  cvUrl           String?   // Uploaded CV file URL
+  cvFileName      String?
+  phone           String?
+  location        String?
+  linkedinUrl     String?
+  portfolioUrl    String?
+  availableFrom   DateTime?
+  expectedSalary  Decimal?  @db.Decimal(10, 2)
+  salaryCurrency  String    @default("GBP")
+  salaryPeriod    SalaryPeriod @default(YEARLY)
+  openToWork      Boolean   @default(true)
+  openToRemote    Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  education       Education[]
+  experience      WorkExperience[]
+  skills          CandidateSkill[]
+  certifications  Certification[]
+  languages       CandidateLanguage[]
+  applications    JobApplication[]
+}
+
+model Education {
+  id              String    @id @default(cuid())
+  candidateId     String
+  institution     String
+  degree          String?   // Bachelor's, Master's, PhD, etc.
+  fieldOfStudy    String?
+  startDate       DateTime?
+  endDate         DateTime?
+  current         Boolean   @default(false)
+  grade           String?
+  description     String?   @db.Text
+  createdAt       DateTime  @default(now())
+
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model WorkExperience {
+  id              String    @id @default(cuid())
+  candidateId     String
+  company         String
+  title           String
+  location        String?
+  locationType    LocationType @default(ONSITE)
+  startDate       DateTime
+  endDate         DateTime?
+  current         Boolean   @default(false)
+  description     String?   @db.Text
+  achievements    String[]
+  createdAt       DateTime  @default(now())
+
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateSkill {
+  id              String    @id @default(cuid())
+  candidateId     String
+  name            String
+  level           SkillLevel @default(INTERMEDIATE)
+  yearsOfExperience Int?
+  createdAt       DateTime  @default(now())
+
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+  @@index([candidateId])
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+model Certification {
+  id              String    @id @default(cuid())
+  candidateId     String
+  name            String
+  issuingOrg      String
+  issueDate       DateTime?
+  expiryDate      DateTime?
+  credentialId    String?
+  credentialUrl   String?
+  createdAt       DateTime  @default(now())
+
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateLanguage {
+  id              String    @id @default(cuid())
+  candidateId     String
+  language        String
+  proficiency     LanguageProficiency @default(INTERMEDIATE)
+  createdAt       DateTime  @default(now())
+
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, language])
+  @@index([candidateId])
+}
+
+enum LanguageProficiency {
+  BASIC
+  INTERMEDIATE
+  FLUENT
+  NATIVE
+}
+
+// ==================== JOB APPLICATIONS ====================
+
+model JobApplication {
+  id              String            @id @default(cuid())
+  jobId           String
+  candidateId     String
+  coverLetter     String?           @db.Text
+  status          ApplicationStatus @default(PENDING)
+  appliedAt       DateTime          @default(now())
+  reviewedAt      DateTime?
+  notes           String?           @db.Text  // Employer notes
+  rating          Int?              // Employer rating 1-5
+
+  job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidate       CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, candidateId])
+  @@index([jobId])
+  @@index([candidateId])
+  @@index([status])
+  @@index([appliedAt])
+}
+
+enum ApplicationStatus {
+  PENDING
+  REVIEWING
+  SHORTLISTED
+  INTERVIEW
+  OFFERED
+  HIRED
+  REJECTED
+  WITHDRAWN
 }

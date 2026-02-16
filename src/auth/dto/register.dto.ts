@@ -6,6 +6,7 @@ import {
   MinLength,
   MaxLength,
   Matches,
+  IsBoolean,
 } from 'class-validator';
 import { UserType } from '@prisma/client';
 
@@ -14,12 +15,8 @@ export class RegisterDto {
   email: string;
 
   @IsString()
-  @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MinLength(4, { message: 'Password must be at least 4 characters' })
   @MaxLength(100)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message:
-      'Password must contain at least one uppercase letter, one lowercase letter, and one number',
-  })
   password: string;
 
   @IsString()
@@ -34,10 +31,15 @@ export class RegisterDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\+?[1-9]\d{1,14}$/, {
-    message: 'Please provide a valid phone number',
-  })
+  @MaxLength(20)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i, {
+    message: 'Please provide a valid UK postcode',
+  })
+  postcode?: string;
 
   @IsOptional()
   @IsEnum(UserType)
@@ -48,4 +50,55 @@ export class RegisterDto {
   @MinLength(2)
   @MaxLength(5)
   preferredLanguage?: string = 'en';
+
+  // Phone verification - if true, phone must be verified before registration completes
+  @IsOptional()
+  @IsBoolean()
+  phoneVerified?: boolean = false;
+}
+
+// DTO for social login/registration
+export class SocialAuthDto {
+  @IsString()
+  @IsEnum(['GOOGLE', 'APPLE', 'LINKEDIN'])
+  provider: 'GOOGLE' | 'APPLE' | 'LINKEDIN';
+
+  @IsString()
+  idToken: string; // OAuth ID token
+
+  @IsOptional()
+  @IsEnum(UserType)
+  type?: UserType = UserType.CUSTOMER;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i, {
+    message: 'Please provide a valid UK postcode',
+  })
+  postcode?: string;
+}
+
+// DTO for completing registration (after phone verification)
+export class CompleteRegistrationDto {
+  @IsString()
+  userId: string;
+
+  @IsString()
+  @Matches(/^\+44[1-9]\d{9,10}$/, {
+    message: 'Please provide a valid UK phone number',
+  })
+  phone: string;
+
+  @IsString()
+  @MinLength(6)
+  @MaxLength(6)
+  @Matches(/^\d{6}$/, { message: 'Code must be 6 digits' })
+  verificationCode: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i, {
+    message: 'Please provide a valid UK postcode',
+  })
+  postcode?: string;
 }

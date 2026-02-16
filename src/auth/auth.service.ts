@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto';
 import { User, UserStatus } from '@prisma/client';
 
@@ -32,6 +33,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private emailService: EmailService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -47,6 +49,11 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
+    // Format postcode (uppercase, standard format)
+    const postcode = dto.postcode
+      ? dto.postcode.toUpperCase().replace(/\s+/g, ' ').trim()
+      : undefined;
+
     // Create user
     const user = await this.prisma.user.create({
       data: {
@@ -55,20 +62,31 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         phone: dto.phone,
+        postcode,
         type: dto.type,
         preferredLanguage: dto.preferredLanguage,
         status: UserStatus.ACTIVE,
+        phoneVerified: dto.phoneVerified || false,
+        phoneVerifiedAt: dto.phoneVerified ? new Date() : null,
+        registrationStep: dto.phoneVerified ? 5 : 4, // Track progress
+        onboardingComplete: dto.phoneVerified || false,
       },
       select: {
         id: true,
         email: true,
         firstName: true,
         lastName: true,
+        phone: true,
+        postcode: true,
         type: true,
         status: true,
         emailVerified: true,
+        phoneVerified: true,
+        addressVerified: true,
         avatar: true,
         preferredLanguage: true,
+        overallTrustScore: true,
+        onboardingComplete: true,
         createdAt: true,
       },
     });
@@ -82,6 +100,10 @@ export class AuthService {
 
     // Save refresh token
     await this.saveRefreshToken(user.id, tokens.refreshToken);
+
+    // Send welcome email (async, don't wait)
+    const welcomeType = dto.type === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER';
+    this.emailService.sendWelcome(user.email, user.firstName, welcomeType);
 
     return {
       ...tokens,
@@ -203,9 +225,12 @@ export class AuthService {
       },
     );
 
-    // TODO: Send email with reset token
-    // For now, log it (remove in production)
-    console.log(`Password reset token for ${email}: ${resetToken}`);
+    // Build reset link
+    const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3001');
+    const resetLink = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
+
+    // Send password reset email
+    this.emailService.sendPasswordReset(user.email, user.firstName, resetLink);
 
     return { message: 'If the email exists, a reset link will be sent' };
   }
