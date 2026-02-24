@@ -1,18 +1,13 @@
-import { Controller, Post, Get, Body, Query } from '@nestjs/common';
-import { AiService } from './ai.service';
+import { Controller, Post, Get, Delete, Patch, Body, Query, Param } from '@nestjs/common';
+import { AiService, ChatResponse } from './ai.service';
 import {
   ChatRequestDto,
-  AIResponseDto,
-  ServiceIntentResponseDto,
-  VoiceChatResponseDto,
   TextToSpeechRequestDto,
   TextToSpeechResponseDto,
   SpeechToTextRequestDto,
   SpeechToTextResponseDto,
   ImageAnalysisRequestDto,
   ImageAnalysisResponseDto,
-  CVChatRequestDto,
-  CVChatResponseDto,
 } from './dto/chat.dto';
 import { Public } from '../common/decorators/public.decorator';
 
@@ -20,10 +15,9 @@ import { Public } from '../common/decorators/public.decorator';
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
-  // New comprehensive chat endpoint
   @Public()
   @Post('chat')
-  async chat(@Body() chatRequest: ChatRequestDto): Promise<AIResponseDto> {
+  async chat(@Body() chatRequest: ChatRequestDto): Promise<ChatResponse> {
     return this.aiService.chat(
       chatRequest.message,
       chatRequest.history || [],
@@ -31,19 +25,15 @@ export class AiController {
       chatRequest.userId,
       chatRequest.isLoggedIn,
       chatRequest.locale || 'en',
+      chatRequest.conversationId,
+      chatRequest.latitude,
+      chatRequest.longitude,
     );
-  }
-
-  // Legacy endpoint for backwards compatibility
-  @Public()
-  @Post('chat/legacy')
-  async chatLegacy(@Body() chatRequest: ChatRequestDto): Promise<ServiceIntentResponseDto> {
-    return this.aiService.analyzeUserIntent(chatRequest.message, chatRequest.history || []);
   }
 
   @Public()
   @Post('voice-chat')
-  async voiceChat(@Body() chatRequest: ChatRequestDto): Promise<VoiceChatResponseDto> {
+  async voiceChat(@Body() chatRequest: ChatRequestDto): Promise<{ text: string; audio: string | null; intent: ChatResponse }> {
     return this.aiService.voiceChat(
       chatRequest.message,
       chatRequest.history || [],
@@ -51,13 +41,38 @@ export class AiController {
       chatRequest.userId,
       chatRequest.isLoggedIn,
       chatRequest.locale || 'en',
+      chatRequest.conversationId,
+    );
+  }
+
+  @Public()
+  @Post('voice-chat-audio')
+  async voiceChatAudio(@Body() body: {
+    audio: string;
+    mimeType?: string;
+    history?: { role: 'user' | 'assistant'; content: string }[];
+    sessionId?: string;
+    userId?: string;
+    isLoggedIn?: boolean;
+    locale?: string;
+    conversationId?: string;
+  }) {
+    return this.aiService.voiceChatAudio(
+      body.audio,
+      body.mimeType || 'audio/webm',
+      body.history || [],
+      body.sessionId,
+      body.userId,
+      body.isLoggedIn,
+      body.locale,
+      body.conversationId,
     );
   }
 
   @Public()
   @Post('tts')
   async textToSpeech(@Body() request: TextToSpeechRequestDto): Promise<TextToSpeechResponseDto> {
-    const audio = await this.aiService.textToSpeech(request.text);
+    const audio = await this.aiService.textToSpeech(request.text, request.voiceName);
     return { audio };
   }
 
@@ -74,27 +89,49 @@ export class AiController {
     const result = await this.aiService.analyzeImage(
       request.image,
       request.mimeType || 'image/jpeg',
-      request.locale || 'en'
+      request.locale || 'en',
     );
     return { ...result, success: !!result.serviceKey };
   }
 
   @Public()
+  @Post('upload-avatar')
+  async uploadAvatar(@Body() body: { imageBase64: string; userId: string }) {
+    return this.aiService.uploadAvatar(body.imageBase64, body.userId);
+  }
+
+  @Public()
   @Get('welcome')
-  getWelcome(@Query('locale') locale?: string): AIResponseDto {
+  getWelcome(@Query('locale') locale?: string): ChatResponse {
     return this.aiService.getWelcomeMessage(locale || 'en');
   }
 
-  // CV Builder AI Chat
+  // ===== Conversation CRUD =====
+
   @Public()
-  @Post('cv-chat')
-  async cvChat(@Body() request: CVChatRequestDto): Promise<CVChatResponseDto> {
-    return this.aiService.cvChat(
-      request.message,
-      request.conversationHistory || [],
-      request.currentCvData,
-      request.userInfo || null,
-      request.locale || 'en',
-    );
+  @Get('conversations')
+  async getConversations(@Query('userId') userId: string, @Query('limit') limit?: string) {
+    if (!userId) return [];
+    return this.aiService.getConversations(userId, limit ? parseInt(limit) : 30);
+  }
+
+  @Public()
+  @Get('conversations/:id')
+  async getConversation(@Param('id') id: string) {
+    return this.aiService.getConversation(id);
+  }
+
+  @Public()
+  @Delete('conversations/:id')
+  async deleteConversation(@Param('id') id: string) {
+    await this.aiService.deleteConversation(id);
+    return { success: true };
+  }
+
+  @Public()
+  @Patch('conversations/:id')
+  async renameConversation(@Param('id') id: string, @Body() body: { title: string }) {
+    await this.aiService.renameConversation(id, body.title);
+    return { success: true };
   }
 }

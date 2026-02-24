@@ -34,6 +34,7 @@ interface JobFilters {
   salaryMin?: number;
   salaryMax?: number;
   status?: JobStatus;
+  location?: string;
 }
 
 @Injectable()
@@ -92,10 +93,20 @@ export class JobsService {
     };
 
     if (filters.search) {
+      // Split search into words for better matching
+      const searchWords = filters.search.split(/\s+/).filter(w => w.length > 1);
+      const skillVariants = searchWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+      // Also add original search terms
+      skillVariants.push(filters.search);
+      searchWords.forEach(w => skillVariants.push(w, w.toLowerCase(), w.toUpperCase()));
+      const uniqueSkills = [...new Set(skillVariants)];
+
       where.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
-        { skills: { hasSome: [filters.search] } },
+        { skills: { hasSome: uniqueSkills } },
+        // Also search each word individually in title
+        ...searchWords.map(word => ({ title: { contains: word, mode: 'insensitive' as const } })),
       ];
     }
 
@@ -113,6 +124,10 @@ export class JobsService {
 
     if (filters.experienceLevel) {
       where.experienceLevel = filters.experienceLevel;
+    }
+
+    if (filters.location) {
+      where.location = { contains: filters.location, mode: 'insensitive' };
     }
 
     if (filters.salaryMin) {

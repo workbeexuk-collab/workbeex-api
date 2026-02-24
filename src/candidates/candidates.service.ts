@@ -249,8 +249,18 @@ export class CandidatesService {
   async addSkill(userId: string, data: SkillDto) {
     const profile = await this.getOrCreateProfile(userId);
 
-    return this.prisma.candidateSkill.create({
-      data: {
+    return this.prisma.candidateSkill.upsert({
+      where: {
+        candidateId_name: {
+          candidateId: profile.id,
+          name: data.name,
+        },
+      },
+      update: {
+        level: data.level || 'INTERMEDIATE',
+        yearsOfExperience: data.yearsOfExperience,
+      },
+      create: {
         candidateId: profile.id,
         name: data.name,
         level: data.level || 'INTERMEDIATE',

@@ -36,6 +36,18 @@ export class ChatRequestDto {
   @IsOptional()
   @IsString()
   locale?: string; // 'en' | 'tr' | 'pl' | 'ro' - default: 'en'
+
+  @IsOptional()
+  @IsString()
+  conversationId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
 }
 
 export class VerifyCodeRequestDto {
@@ -53,6 +65,10 @@ export class VerifyCodeRequestDto {
 export class TextToSpeechRequestDto {
   @IsString()
   text: string;
+
+  @IsOptional()
+  @IsString()
+  voiceName?: string; // Gemini TTS voice: Kore, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr
 }
 
 export class SpeechToTextRequestDto {
