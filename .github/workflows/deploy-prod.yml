@@ -2,7 +2,7 @@ name: Deploy Production
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 jobs:
   test:
@@ -37,7 +37,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /var/www/workbee-backend
-            git pull origin master
+            git pull origin main
             npm ci --production=false
             npx prisma generate
             npx prisma db push --accept-data-loss
