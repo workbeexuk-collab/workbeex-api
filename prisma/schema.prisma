@@ -55,6 +55,7 @@ model User {
   favorites                 Favorite[]
   employerJobs              Job[]                       @relation("EmployerJobs")
   candidateProfile          CandidateProfile?
+  aiConversations           AiConversation[]
 
   @@index([email])
   @@index([type])
@@ -1123,4 +1124,35 @@ enum ApplicationStatus {
   HIRED
   REJECTED
   WITHDRAWN
+}
+
+// ===== AI Chat Persistence =====
+
+model AiConversation {
+  id        String   @id @default(cuid())
+  userId    String?
+  title     String   @default("Yeni Sohbet")
+  preview   String?
+  locale    String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String   @db.Text
+  toolResults    Json?
+  quickActions   Json?
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
 }
