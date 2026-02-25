@@ -1081,9 +1081,28 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
         });
 
         const candidate = response.candidates?.[0];
-        if (!candidate?.content?.parts) {
-          this.logger.error(`No parts in response. finishReason=${candidate?.finishReason}, candidates=${JSON.stringify(response.candidates?.map((c: any) => ({ finishReason: c.finishReason, safetyRatings: c.safetyRatings })))}`);
-          this.logger.error(`Prompt feedback: ${JSON.stringify(response.promptFeedback)}`);
+        if (!candidate?.content?.parts || candidate.content.parts.length === 0) {
+          this.logger.error(`No parts. finishReason=${candidate?.finishReason}, content=${JSON.stringify(candidate?.content)}, fullResponse=${JSON.stringify(response).substring(0, 500)}`);
+          // If STOP with no parts, Gemini chose not to respond — retry without tools as text-only
+          if (candidate?.finishReason === 'STOP' && loopCount === 1) {
+            this.logger.log('Retrying without tools as text-only fallback...');
+            const retryResponse = await this.genAI!.models.generateContent({
+              model,
+              contents: currentContents,
+              config: {
+                systemInstruction: systemPrompt,
+                temperature: 0.3,
+                maxOutputTokens: 1024,
+              },
+            });
+            const retryCandidate = retryResponse.candidates?.[0];
+            if (retryCandidate?.content?.parts) {
+              for (const part of retryCandidate.content.parts) {
+                if (part.text) finalMessage += part.text;
+              }
+              this.logger.log(`Retry succeeded: "${finalMessage.substring(0, 100)}..."`);
+            }
+          }
           break;
         }
 
