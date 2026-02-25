@@ -1012,9 +1012,10 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       while (loopCount < MAX_FUNCTION_CALL_LOOPS) {
         loopCount++;
 
-        // Use AUTO mode to let model decide when to call tools
-        // ANY mode was causing issues — forcing tool calls when model needed to chat first
-        const callingMode = 'AUTO';
+        // First turn: use ANY to force tool call if message contains action keywords
+        // Otherwise use AUTO to let model decide
+        const actionKeywords = /\b(bul|ara|göster|listele|oluştur|kaydet|kayıt|find|search|show|create|save|apply|başvur|başla|hazırla|yap)\b/i;
+        const callingMode = (loopCount === 1 && actionKeywords.test(safeMessage)) ? 'ANY' : 'AUTO';
 
         const response = await this.genAI!.models.generateContent({
           model,
