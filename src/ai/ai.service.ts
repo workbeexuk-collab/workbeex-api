@@ -1012,6 +1012,9 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       while (loopCount < MAX_FUNCTION_CALL_LOOPS) {
         loopCount++;
 
+        // First turn: ANY forces tool call. Subsequent: AUTO lets model respond with text after tool results
+        const callingMode = loopCount === 1 ? 'ANY' : 'AUTO';
+
         const response = await this.genAI!.models.generateContent({
           model,
           contents: currentContents,
@@ -1020,7 +1023,7 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
             temperature: 0.3,
             maxOutputTokens: 1024,
             tools: [{ functionDeclarations: toolDeclarations as any }],
-            toolConfig: { functionCallingConfig: { mode: 'AUTO' as any } },
+            toolConfig: { functionCallingConfig: { mode: callingMode as any } },
           },
         });
 
