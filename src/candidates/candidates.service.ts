@@ -551,9 +551,10 @@ export class CandidatesService {
   }) {
     const { position, skills, location, experienceYears, remoteOk } = criteria;
 
-    const where: any = {
-      openToWork: true,
-    };
+    const where: any = {};
+
+    // Prefer candidates open to work, but don't exclude others
+    // openToWork is used for ordering, not filtering
 
     // Build search conditions - combine position and skills search
     const orConditions: any[] = [];
@@ -590,8 +591,9 @@ export class CandidatesService {
       where.OR = orConditions;
     }
 
-    // Only filter by location if provided and not empty
-    if (location && location.trim()) {
+    // Only filter by location if it's a real city name (skip generic terms)
+    const skipLocationKeywords = ['remote', 'anywhere', 'yok', 'herhangi', 'farketmez', 'none', 'any', 'hepsi', 'all'];
+    if (location && location.trim() && !skipLocationKeywords.some(kw => location.toLowerCase().includes(kw))) {
       where.location = { contains: location.trim(), mode: 'insensitive' };
     }
 
@@ -603,7 +605,7 @@ export class CandidatesService {
     const candidates = await this.prisma.candidateProfile.findMany({
       where,
       take: 10,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ openToWork: 'desc' }, { updatedAt: 'desc' }],
       include: {
         user: {
           select: {

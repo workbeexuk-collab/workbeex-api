@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CandidatesService } from './candidates.service';
 import { CloudinaryService } from '../uploads/cloudinary.service';
+import { Public } from '../common/decorators/public.decorator';
 
 interface AuthUser {
   id: string;
@@ -59,7 +60,8 @@ export class CandidatesController {
     };
   }
 
-  // AI-powered candidate search
+  // AI-powered candidate search (public - used by AI chat employer flow)
+  @Public()
   @Post('ai-search')
   async aiSearchCandidates(
     @Body() body: {
