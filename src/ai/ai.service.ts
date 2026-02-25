@@ -1020,12 +1020,29 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
     const systemPrompt = this.buildSystemPrompt(activeRegions, session.locale, session.isLoggedIn, session.userId, userCoords);
     const model = await this.getAiModel();
 
-    // Build contents for Gemini
-    const contents: any[] = trimmedHistory.map((msg) => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }],
-    }));
-    contents.push({ role: 'user', parts: [{ text: safeMessage }] });
+    // Build contents for Gemini — must alternate user/model roles
+    const contents: any[] = [];
+    for (const msg of trimmedHistory) {
+      const role = msg.role === 'user' ? 'user' : 'model';
+      const last = contents[contents.length - 1];
+      if (last && last.role === role) {
+        // Merge consecutive same-role messages
+        last.parts[0].text += '\n' + msg.content;
+      } else {
+        contents.push({ role, parts: [{ text: msg.content }] });
+      }
+    }
+    // Ensure first message is "user" (Gemini requirement)
+    if (contents.length > 0 && contents[0].role !== 'user') {
+      contents.shift();
+    }
+    // Append current message — merge if last is also user
+    const last = contents[contents.length - 1];
+    if (last && last.role === 'user') {
+      last.parts[0].text += '\n' + safeMessage;
+    } else {
+      contents.push({ role: 'user', parts: [{ text: safeMessage }] });
+    }
 
     const toolResults: ToolResult[] = [];
     let quickActions: { label: string; value: string; icon?: string }[] | undefined;
