@@ -1049,7 +1049,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
     let finalMessage = '';
 
     try {
-      this.logger.log(`AI Chat: "${safeMessage.substring(0, 50)}..." locale=${session.locale}, model=${model}`);
+      this.logger.log(`AI Chat: "${safeMessage.substring(0, 50)}..." locale=${session.locale}, model=${model}, history=${trimmedHistory.length}, contents=${contents.length}`);
+      this.logger.log(`Contents roles: ${contents.map((c: any) => c.role).join(' → ')}`);
 
       // Function calling loop
       let loopCount = 0;
@@ -1081,7 +1082,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
 
         const candidate = response.candidates?.[0];
         if (!candidate?.content?.parts) {
-          this.logger.error('No parts in response');
+          this.logger.error(`No parts in response. finishReason=${candidate?.finishReason}, candidates=${JSON.stringify(response.candidates?.map((c: any) => ({ finishReason: c.finishReason, safetyRatings: c.safetyRatings })))}`);
+          this.logger.error(`Prompt feedback: ${JSON.stringify(response.promptFeedback)}`);
           break;
         }
 
