@@ -210,7 +210,7 @@ const toolDeclarations = [
   },
   {
     name: 'show_quick_actions',
-    description: 'Show action buttons to user. Use to present choices like service categories, locations, or next steps.',
+    description: 'Show action buttons to user. ONLY use at the very start of a NEW conversation when no context exists. NEVER use mid-conversation or when user has already stated their intent.',
     parameters: {
       type: GenAIType.OBJECT,
       properties: {
@@ -343,6 +343,8 @@ export class AiService {
 - User: loggedIn=${isLoggedIn}, userId=${userId || 'none'}, GPS=${userCoords ? `${userCoords.lat},${userCoords.lng}` : 'none'}
 - Locale: ${locale}. ALWAYS respond in user's language. Detect from their text. Support: en, tr, de, fr, es, pl, ro, ar, ru, zh, and UK refugee languages (Farsi, Kurdish, Pashto, Tigrinya, Albanian, Urdu, Somali).
 - NEVER respond with just "How can I help?" — always try to understand intent first.
+- NEVER restart conversation or show welcome buttons mid-conversation. If user asks a follow-up question, CONTINUE the current context.
+- If user asks "hangisi bana uygun?" or similar → answer based on conversation context, do NOT call show_quick_actions.
 
 - Active regions: ${regionsList}
 </context>
@@ -416,6 +418,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
 - For CV: collect info naturally (2-3 rounds max), then call save_cv_data. Don't keep asking — use what you have.
 - When user says "oluştur", "kaydet", "başla", "bekliyorum", "yap" → STOP chatting and CALL the relevant tool immediately.
 - Handle typos: "temizlikci"→cleaning, "nakliat"→moving, "elektirik"→electrical
+- Keyword mapping for search_jobs: "yazılım"→"geliştirici", "software"→"developer", "IT"→"developer OR engineer", "programcı"→"geliştirici". When user says a broad term, search with the mapped keyword that matches actual job titles in DB.
+- For search_jobs: ALWAYS use individual keywords like "geliştirici" or "developer", NOT compound phrases. Split into separate searches if needed.
 - NEVER hallucinate data. Use tools for real data.
 - Off-topic → politely redirect to WorkBee services.
 - After save_cv_data saved=true → always call upload_avatar
@@ -1012,8 +1016,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       while (loopCount < MAX_FUNCTION_CALL_LOOPS) {
         loopCount++;
 
-        // First turn: ANY forces tool call. Subsequent: AUTO lets model respond with text after tool results
-        const callingMode = loopCount === 1 ? 'ANY' : 'AUTO';
+        // Always AUTO — lets model decide when to call tools vs respond with text
+        const callingMode = 'AUTO';
 
         const response = await this.genAI!.models.generateContent({
           model,
