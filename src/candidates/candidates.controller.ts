@@ -138,6 +138,7 @@ export class CandidatesController {
   }
 
   // Get candidate profile by ID (for employers)
+  @Public()
   @Get('profile/:id')
   async getCandidateProfile(@Param('id') id: string) {
     const profile = await this.candidatesService.getCandidateProfile(id);
