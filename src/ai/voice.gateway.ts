@@ -63,6 +63,20 @@ const voiceToolDeclarations = [
     },
   },
   {
+    name: 'create_provider_profile',
+    description: 'Create provider profile when user wants to offer services.',
+    parameters: {
+      type: GenAIType.OBJECT,
+      properties: {
+        bio: { type: GenAIType.STRING, description: 'Professional bio' },
+        hourlyRate: { type: GenAIType.NUMBER, description: 'Hourly rate' },
+        location: { type: GenAIType.STRING, description: 'City' },
+        services: { type: GenAIType.ARRAY, items: { type: GenAIType.OBJECT, properties: { slug: { type: GenAIType.STRING }, price: { type: GenAIType.NUMBER } }, required: ['slug'] } },
+      },
+      required: ['bio', 'services'],
+    },
+  },
+  {
     name: 'get_service_locations',
     description: 'Get available locations for a service. Call after search_providers returns 0 results, or when user asks which cities have a service.',
     parameters: {
@@ -318,6 +332,8 @@ IMPORTANT: Keep voice responses SHORT. No more than 2-3 sentences. Be direct. Ma
         return { page: args.page, reason: args.reason };
       case 'get_service_locations':
         return this.aiService.executeGetServiceLocationsPublic(args);
+      case 'create_provider_profile':
+        return this.aiService.executeCreateProviderProfilePublic(args, fakeSession as any);
       default:
         return { error: `Unknown tool: ${name}` };
     }

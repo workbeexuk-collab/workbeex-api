@@ -168,6 +168,34 @@ const toolDeclarations = [
       },
     },
   },
+  // --- SERVICE PROVIDER TOOLS ---
+  {
+    name: 'create_provider_profile',
+    description: 'Create or update a service provider profile for the logged-in user. Call when user says "hizmet vermek istiyorum", "become a provider", "I want to offer services". Collect bio + at least 1 service slug conversationally. User MUST be logged in (register first with userType=PROVIDER if needed).',
+    parameters: {
+      type: GenAIType.OBJECT,
+      properties: {
+        bio: { type: GenAIType.STRING, description: 'Professional bio describing experience and expertise (auto-generate from conversation)' },
+        hourlyRate: { type: GenAIType.NUMBER, description: 'Hourly rate in local currency' },
+        location: { type: GenAIType.STRING, description: 'City where provider operates, e.g. "London", "Istanbul"' },
+        serviceRadius: { type: GenAIType.NUMBER, description: 'Service radius in km, default 25' },
+        services: {
+          type: GenAIType.ARRAY,
+          items: {
+            type: GenAIType.OBJECT,
+            properties: {
+              slug: { type: GenAIType.STRING, enum: SERVICE_SLUGS, description: 'Service type slug' },
+              price: { type: GenAIType.NUMBER, description: 'Price for this service (optional)' },
+              priceType: { type: GenAIType.STRING, enum: ['HOURLY', 'FIXED', 'STARTING_FROM'], description: 'Default HOURLY' },
+            },
+            required: ['slug'],
+          },
+          description: 'Services the provider offers (at least 1)',
+        },
+      },
+      required: ['bio', 'services'],
+    },
+  },
   // --- ACCOUNT & NAVIGATION TOOLS ---
   {
     name: 'register_user',
@@ -370,16 +398,19 @@ Detect which type and follow the corresponding flow:
    → After posting → proactively search_candidates → show matches
    → Smart defaults: FULL_TIME, MID level, currency from location, infer skills from description
 
-4. SERVICE PROVIDER ("hizmet vermek istiyorum", "become a provider")
-   → Explain WorkBee model → ask if they want to register → navigate to provider panel
+4. SERVICE PROVIDER ("hizmet vermek istiyorum", "become a provider", "temizlik hizmeti vermek istiyorum")
+   → Ask what services they offer, their experience, location, hourly rate
+   → If not logged in → register_user with userType=PROVIDER first
+   → Then call create_provider_profile with bio, services, location, hourlyRate
+   → After success → suggest upload_avatar for profile photo
 </user_types>
 
 <tool_rules>
 CRITICAL: ALWAYS call tools when you have enough info. Do NOT just chat — take ACTION.
-- If user mentions a service + location → IMMEDIATELY call search_providers. Do NOT ask follow-up questions first.
+- If user mentions a service (with or without location) → IMMEDIATELY call search_providers. Do NOT ask "which city?" or any follow-up. Location is OPTIONAL — just call the tool now.
 - If user mentions job search + any keyword → IMMEDIATELY call search_jobs. Do NOT ask "what kind of job?" first.
 - If user says "bul", "ara", "göster", "listele", "find", "search", "show" → this is a DIRECT command. Call the tool NOW.
-- search_providers: need serviceSlug + optional location. Empty results → auto-fallback + show available locations
+- search_providers: serviceSlug is enough, location is OPTIONAL. NEVER ask for location — if user didn't say a city, call search_providers WITHOUT location. The backend will return all available providers. Empty results → auto-fallback + show available locations
 - search_jobs: partial info is fine. Empty → auto-searches other locations
 - get_provider_details: ALWAYS use instead of navigate_user for viewing a provider
 - save_cv_data: CRITICAL — when user has given you skills/experience info AND says "oluştur", "kaydet", "save", "create cv", "başla", "bekliyorum", "hazırla" → IMMEDIATELY call save_cv_data with all collected info. Do NOT keep asking questions. headline + 1 skill minimum is enough. Auto-generate headline from context (e.g. "Senior PHP Developer with 10 years experience"). Fill in what you have, leave rest empty.
@@ -387,6 +418,7 @@ CRITICAL: ALWAYS call tools when you have enough info. Do NOT just chat — take
 - apply_job: needs jobId from results. Auto-generate cover letter from conversation context
 - search_candidates: call after create_job success, or when employer asks for candidates
 - register_user: collect info conversationally, NEVER redirect to signup page
+- create_provider_profile: bio + at least 1 service slug required. Auto-generate bio from conversation. After success → suggest upload_avatar
 - navigate_user: ONLY for page navigation, NEVER for provider profiles
 - upload_avatar: call after save_cv_data success
 - get_service_locations: call after empty results or when user asks about available services/locations. NEVER fabricate locations.
@@ -466,6 +498,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
         return this.executeApplyJob(args, session);
       case 'search_candidates':
         return this.executeSearchCandidates(args);
+      case 'create_provider_profile':
+        return this.executeCreateProviderProfile(args, session);
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -502,6 +536,71 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       const msg = error?.message || 'Registration failed';
       return { registered: false, error: msg };
     }
+  }
+
+  private async executeCreateProviderProfile(args: any, session: ConversationSession): Promise<any> {
+    if (!session.isLoggedIn || !session.userId) {
+      return { created: false, requiresAuth: true, error: 'User must be logged in to create a provider profile. Register them first with userType=PROVIDER.' };
+    }
+    try {
+      // Ensure user type is PROVIDER
+      await this.prisma.user.update({
+        where: { id: session.userId },
+        data: { type: 'PROVIDER' },
+      });
+
+      // Upsert provider profile
+      const provider = await this.prisma.provider.upsert({
+        where: { userId: session.userId },
+        update: {
+          bio: args.bio,
+          hourlyRate: args.hourlyRate || null,
+          location: args.location || null,
+          serviceRadius: args.serviceRadius || 25,
+        },
+        create: {
+          userId: session.userId,
+          bio: args.bio,
+          hourlyRate: args.hourlyRate || null,
+          location: args.location || null,
+          serviceRadius: args.serviceRadius || 25,
+        },
+      });
+
+      // Add services
+      const addedServices: string[] = [];
+      if (args.services?.length) {
+        for (const svc of args.services) {
+          const service = await this.prisma.service.findUnique({ where: { slug: svc.slug } });
+          if (!service) continue;
+
+          await this.prisma.providerService.upsert({
+            where: { providerId_serviceId: { providerId: provider.id, serviceId: service.id } },
+            update: { price: svc.price || null, priceType: svc.priceType || 'HOURLY' },
+            create: { providerId: provider.id, serviceId: service.id, price: svc.price || null, priceType: svc.priceType || 'HOURLY' },
+          });
+          addedServices.push(svc.slug);
+        }
+      }
+
+      return {
+        created: true,
+        providerId: provider.id,
+        bio: provider.bio,
+        location: provider.location,
+        hourlyRate: provider.hourlyRate,
+        services: addedServices,
+        profileUrl: `/providers/${provider.id}`,
+      };
+    } catch (error: any) {
+      this.logger.error('create_provider_profile error:', error);
+      return { created: false, error: error?.message || 'Failed to create provider profile' };
+    }
+  }
+
+  // Make it available for voice gateway
+  async executeCreateProviderProfilePublic(args: any, session: any): Promise<any> {
+    return this.executeCreateProviderProfile(args, session);
   }
 
   private async executeGetProviderDetails(args: any): Promise<any> {
@@ -758,6 +857,8 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
           location: p.location,
           verified: p.verified,
           services: p.services.map((s: any) => s.name),
+          latitude: p.latitude ? Number(p.latitude) : null,
+          longitude: p.longitude ? Number(p.longitude) : null,
           ...(distance != null ? { distanceKm: distance } : {}),
         };
       };
@@ -886,6 +987,19 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
     }
 
     try {
+      // Check CV creation limit (max 3 per user)
+      const existing = await this.prisma.candidateProfile.findUnique({
+        where: { userId: session.userId },
+        select: { aiCvCount: true },
+      });
+      if (existing && existing.aiCvCount >= 3) {
+        return {
+          saved: false,
+          limitReached: true,
+          error: 'You have reached the maximum limit of 3 AI-generated CVs. Please edit your existing CV manually or contact support.',
+        };
+      }
+
       // Update profile
       await this.candidatesService.updateProfile(session.userId, {
         headline: args.headline,
@@ -941,7 +1055,18 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
         }
       }
 
-      return { saved: true, profileUrl: '/cv' };
+      // Increment AI CV counter
+      await this.prisma.candidateProfile.update({
+        where: { userId: session.userId },
+        data: { aiCvCount: { increment: 1 } },
+      });
+
+      const updated = await this.prisma.candidateProfile.findUnique({
+        where: { userId: session.userId },
+        select: { aiCvCount: true },
+      });
+
+      return { saved: true, profileUrl: '/cv', cvCount: updated?.aiCvCount || 1, cvLimit: 3 };
     } catch (error) {
       this.logger.error('save_cv_data error:', error);
       return { saved: false, error: 'Could not save CV data' };

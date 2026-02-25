@@ -43,6 +43,7 @@ jobs:
             npm ci --production=false
             npx prisma generate
             npx prisma db push --accept-data-loss
+            npx prisma db seed || true
             npm run build
             pm2 restart workbee-backend-dev
             echo "✅ Sandbox deploy complete"

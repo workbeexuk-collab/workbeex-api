@@ -986,6 +986,7 @@ model CandidateProfile {
   salaryPeriod    SalaryPeriod @default(YEARLY)
   openToWork      Boolean   @default(true)
   openToRemote    Boolean   @default(true)
+  aiCvCount       Int       @default(0) // AI-generated CV count (max 3)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
