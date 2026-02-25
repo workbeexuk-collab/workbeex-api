@@ -1020,29 +1020,17 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
     const systemPrompt = this.buildSystemPrompt(activeRegions, session.locale, session.isLoggedIn, session.userId, userCoords);
     const model = await this.getAiModel();
 
-    // Build contents for Gemini — must alternate user/model roles
-    const contents: any[] = [];
-    for (const msg of trimmedHistory) {
-      const role = msg.role === 'user' ? 'user' : 'model';
-      const last = contents[contents.length - 1];
-      if (last && last.role === role) {
-        // Merge consecutive same-role messages
-        last.parts[0].text += '\n' + msg.content;
-      } else {
-        contents.push({ role, parts: [{ text: msg.content }] });
-      }
+    // Build contents for Gemini
+    // Gemini 2.5-flash has issues with multi-turn contents (returns empty parts).
+    // Workaround: embed conversation history into the user message itself.
+    let contextualMessage = safeMessage;
+    if (trimmedHistory.length > 0) {
+      const historyText = trimmedHistory.map(m =>
+        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+      ).join('\n');
+      contextualMessage = `<conversation_history>\n${historyText}\n</conversation_history>\n\nUser's latest message: ${safeMessage}\n\nIMPORTANT: Continue the conversation naturally based on the history above. Do NOT greet or restart. Take action based on context.`;
     }
-    // Ensure first message is "user" (Gemini requirement)
-    if (contents.length > 0 && contents[0].role !== 'user') {
-      contents.shift();
-    }
-    // Append current message — merge if last is also user
-    const last = contents[contents.length - 1];
-    if (last && last.role === 'user') {
-      last.parts[0].text += '\n' + safeMessage;
-    } else {
-      contents.push({ role: 'user', parts: [{ text: safeMessage }] });
-    }
+    const contents: any[] = [{ role: 'user', parts: [{ text: contextualMessage }] }];
 
     const toolResults: ToolResult[] = [];
     let quickActions: { label: string; value: string; icon?: string }[] | undefined;
