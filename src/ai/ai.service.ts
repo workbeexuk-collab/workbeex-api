@@ -342,9 +342,11 @@ export class AiService {
 <context>
 - User: loggedIn=${isLoggedIn}, userId=${userId || 'none'}, GPS=${userCoords ? `${userCoords.lat},${userCoords.lng}` : 'none'}
 - Locale: ${locale}. ALWAYS respond in user's language. Detect from their text. Support: en, tr, de, fr, es, pl, ro, ar, ru, zh, and UK refugee languages (Farsi, Kurdish, Pashto, Tigrinya, Albanian, Urdu, Somali).
-- NEVER respond with just "How can I help?" — always try to understand intent first.
+- CRITICAL: NEVER respond with just "How can I help?" or "Size nasıl yardımcı olabilirim?". ALWAYS analyze the user's message and take action or ask a specific question.
+- If user mentions ANY service, job, or hiring intent → call the appropriate tool IMMEDIATELY. Do NOT greet first.
 - NEVER restart conversation or show welcome buttons mid-conversation. If user asks a follow-up question, CONTINUE the current context.
 - If user asks "hangisi bana uygun?" or similar → answer based on conversation context, do NOT call show_quick_actions.
+- show_quick_actions should ONLY be called when message is a generic greeting like "merhaba", "hello", "hi" with NO other intent.
 
 - Active regions: ${regionsList}
 </context>
@@ -989,7 +991,29 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
     }
 
     const safeMessage = userMessage.slice(0, MAX_MESSAGE_LENGTH);
-    const trimmedHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+
+    // If frontend didn't send history, load from DB
+    let effectiveHistory = conversationHistory;
+    if ((!effectiveHistory || effectiveHistory.length === 0) && convId) {
+      try {
+        const dbMessages = await this.prisma.aiMessage.findMany({
+          where: { conversationId: convId },
+          orderBy: { createdAt: 'asc' },
+          take: MAX_HISTORY_MESSAGES,
+          select: { role: true, content: true },
+        });
+        if (dbMessages.length > 0) {
+          effectiveHistory = dbMessages
+            .filter(m => m.content && m.content.trim())
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+          this.logger.log(`📚 Loaded ${effectiveHistory.length} messages from DB for conversation ${convId}`);
+        }
+      } catch (e) {
+        this.logger.warn('Failed to load history from DB:', e);
+      }
+    }
+
+    const trimmedHistory = effectiveHistory.slice(-MAX_HISTORY_MESSAGES);
     const activeRegions = await this.getActiveRegions();
     const userCoords = (latitude != null && longitude != null) ? { lat: latitude, lng: longitude } : undefined;
     const systemPrompt = this.buildSystemPrompt(activeRegions, session.locale, session.isLoggedIn, session.userId, userCoords);
@@ -1054,9 +1078,16 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
 
           // Function call
           if (part.functionCall) {
-            hasFunctionCall = true;
             const fcName = part.functionCall.name || 'unknown';
             const fcArgs = part.functionCall.args || {};
+
+            // Block show_quick_actions if there's conversation history (not a fresh chat)
+            if (fcName === 'show_quick_actions' && trimmedHistory.length > 0) {
+              this.logger.warn(`⚠️ Blocked show_quick_actions mid-conversation (${trimmedHistory.length} history msgs)`);
+              continue;
+            }
+
+            hasFunctionCall = true;
             this.logger.log(`🔧 Function call: ${fcName}(${JSON.stringify(fcArgs)})`);
 
             const result = await this.executeTool(fcName, fcArgs, session, userCoords);
@@ -1085,9 +1116,21 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       }
 
       if (!finalMessage) {
-        finalMessage = session.locale === 'tr'
-          ? 'Size nasıl yardımcı olabilirim?'
-          : 'How can I help you?';
+        // If we have tool results, don't show a generic greeting — summarize what happened
+        if (toolResults.length > 0) {
+          finalMessage = session.locale === 'tr'
+            ? 'İşte sonuçlar:'
+            : 'Here are the results:';
+        } else if (quickActions && quickActions.length > 0) {
+          finalMessage = session.locale === 'tr'
+            ? 'Size nasıl yardımcı olabilirim? Aşağıdaki seçeneklerden birini tercih edebilirsiniz:'
+            : 'How can I help you? You can choose from the options below:';
+        } else {
+          // True fallback — only when AI genuinely returned nothing
+          finalMessage = session.locale === 'tr'
+            ? 'Size nasıl yardımcı olabilirim?'
+            : 'How can I help you?';
+        }
       }
 
       // Save assistant message to DB
