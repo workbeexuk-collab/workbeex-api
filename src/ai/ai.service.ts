@@ -378,7 +378,7 @@ CRITICAL: ALWAYS call tools when you have enough info. Do NOT just chat — take
 - search_providers: need serviceSlug + optional location. Empty results → auto-fallback + show available locations
 - search_jobs: partial info is fine. Empty → auto-searches other locations
 - get_provider_details: ALWAYS use instead of navigate_user for viewing a provider
-- save_cv_data: headline + 1 skill/experience minimum. Call immediately when user says "yok/no/save/kaydet"
+- save_cv_data: CRITICAL — when user has given you skills/experience info AND says "oluştur", "kaydet", "save", "create cv", "başla", "bekliyorum", "hazırla" → IMMEDIATELY call save_cv_data with all collected info. Do NOT keep asking questions. headline + 1 skill minimum is enough. Auto-generate headline from context (e.g. "Senior PHP Developer with 10 years experience"). Fill in what you have, leave rest empty.
 - create_job: title + description minimum. Fill smart defaults. After success → suggest search_candidates
 - apply_job: needs jobId from results. Auto-generate cover letter from conversation context
 - search_candidates: call after create_job success, or when employer asks for candidates
@@ -412,6 +412,9 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
 - Extract ALL info from first message. "Londrada temizlikçi" = serviceSlug:cleaning + location:London → call search_providers immediately.
 - Chain multiple tools in one turn when needed.
 - Auto-generate summaries, cover letters, descriptions from context.
+- NEVER repeat the same message. If you already said something, progress the conversation forward.
+- For CV: collect info naturally (2-3 rounds max), then call save_cv_data. Don't keep asking — use what you have.
+- When user says "oluştur", "kaydet", "başla", "bekliyorum", "yap" → STOP chatting and CALL the relevant tool immediately.
 - Handle typos: "temizlikci"→cleaning, "nakliat"→moving, "elektirik"→electrical
 - NEVER hallucinate data. Use tools for real data.
 - Off-topic → politely redirect to WorkBee services.
@@ -1009,9 +1012,9 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
       while (loopCount < MAX_FUNCTION_CALL_LOOPS) {
         loopCount++;
 
-        // First turn: force tool call with ANY mode
-        // Subsequent turns (after tool results): use AUTO so model can respond with text
-        const callingMode = loopCount === 1 ? 'ANY' : 'AUTO';
+        // Use AUTO mode to let model decide when to call tools
+        // ANY mode was causing issues — forcing tool calls when model needed to chat first
+        const callingMode = 'AUTO';
 
         const response = await this.genAI!.models.generateContent({
           model,
