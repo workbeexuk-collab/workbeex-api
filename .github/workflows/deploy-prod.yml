@@ -37,6 +37,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /var/www/workbee-backend
+            git remote set-url origin git@github.com:workbeexuk-collab/workbeex-api.git || true
             git pull origin main
             npm ci --production=false
             npx prisma generate
