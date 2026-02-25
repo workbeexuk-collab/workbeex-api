@@ -1044,6 +1044,12 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
         // Always AUTO — lets model decide when to call tools vs respond with text
         const callingMode = 'AUTO';
 
+        // Remove show_quick_actions from tools when there's conversation history
+        // This prevents Gemini from resetting the conversation mid-chat
+        const activeTools = trimmedHistory.length > 0
+          ? toolDeclarations.filter((t: any) => t.name !== 'show_quick_actions')
+          : toolDeclarations;
+
         const response = await this.genAI!.models.generateContent({
           model,
           contents: currentContents,
@@ -1051,7 +1057,7 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results au
             systemInstruction: systemPrompt,
             temperature: 0.3,
             maxOutputTokens: 1024,
-            tools: [{ functionDeclarations: toolDeclarations as any }],
+            tools: [{ functionDeclarations: activeTools as any }],
             toolConfig: { functionCallingConfig: { mode: callingMode as any } },
           },
         });
