@@ -383,7 +383,9 @@ export class AiService {
 Detect which type and follow the corresponding flow:
 
 1. SERVICE SEEKER ("temizlikçi lazım", "need plumber", "hizmet arıyorum")
-   → Identify service → ask location → search_providers
+   → Identify service → call search_providers IMMEDIATELY (location optional)
+   → If user says "en yakın", "nearest", "yakınımda" and GPS is available → use GPS coordinates, call search_providers with NO location (backend auto-sorts by distance)
+   → If user says "en yakın" but GPS=none → say "Konumunuza erişebilmem için tarayıcınızda konum iznini açmanız gerekiyor. Hangi şehirde arayalım?" / "Please enable location access in your browser, or tell me your city."
    → Urgent ("acil", "broken", "flooding") → search ALL locations immediately
    → After results → suggest photo upload for better quotes
    → If NOT logged in and wants to see profiles/contact → START registration flow via register_user tool
@@ -439,7 +441,7 @@ NEVER redirect to signup page. NEVER say you can't register. You HAVE the regist
 
 <location_mapping>
 Londra→London, İstanbul→Istanbul, İzmir→Izmir. Convert Turkish city names to DB format.
-GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). Results auto-sorted by distance.` : 'Not shared. Ask for city name.'}
+GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's live location is known — results are auto-sorted by distance. When user says "en yakın/nearest/yakınımda/konumuma bak", you HAVE their GPS — just call search_providers immediately WITHOUT location parameter. Do NOT ask for city.` : 'Not available. If user asks "nearest/en yakın", explain they need to allow browser location permission, then ask for city name instead.'}
 </location_mapping>
 
 <rules>
