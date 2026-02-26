@@ -473,7 +473,12 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
   // ===== TOOL EXECUTORS =====
 
   private async executeTool(name: string, args: any, session: ConversationSession, userCoords?: { lat: number; lng: number }): Promise<any> {
-    this.logger.log(`🔧 Executing tool: ${name} with args: ${JSON.stringify(args)}`);
+    // Redact sensitive fields from log
+    const redactedArgs = { ...args };
+    for (const key of ['password', 'email', 'phone', 'imageBase64', 'image']) {
+      if (redactedArgs[key]) redactedArgs[key] = '[REDACTED]';
+    }
+    this.logger.log(`🔧 Executing tool: ${name} with args: ${JSON.stringify(redactedArgs)}`);
 
     switch (name) {
       case 'search_jobs':
@@ -1118,7 +1123,12 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
       if (charMatches >= 2 || wordMatches >= 1) session.locale = 'tr';
     }
 
-    const safeMessage = userMessage.slice(0, MAX_MESSAGE_LENGTH);
+    // Sanitize: strip XML-like tags and prompt injection attempts
+    const sanitize = (text: string) => text
+      .replace(/<\/?(?:system|instruction|prompt|role|context|rules|tool_rules|conversation_history)[^>]*>/gi, '')
+      .replace(/(?:ignore|forget|discard)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|rules?)/gi, '[filtered]')
+      .slice(0, MAX_MESSAGE_LENGTH);
+    const safeMessage = sanitize(userMessage);
 
     // If frontend didn't send history, load from DB
     let effectiveHistory = conversationHistory;
@@ -1153,7 +1163,7 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
     let contextualMessage = safeMessage;
     if (trimmedHistory.length > 0) {
       const historyText = trimmedHistory.map(m =>
-        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+        `${m.role === 'user' ? 'User' : 'Assistant'}: ${sanitize(m.content)}`
       ).join('\n');
       contextualMessage = `<conversation_history>\n${historyText}\n</conversation_history>\n\nUser's latest message: ${safeMessage}\n\nIMPORTANT: Continue the conversation naturally based on the history above. Do NOT greet or restart. Take action based on context.`;
     }
@@ -1354,6 +1364,13 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
       take: limit,
       select: { id: true, title: true, preview: true, locale: true, createdAt: true, updatedAt: true },
     });
+  }
+
+  async verifyConversationOwnership(conversationId: string, userId: string) {
+    if (!userId) throw new Error('userId required');
+    const conv = await this.prisma.aiConversation.findUnique({ where: { id: conversationId }, select: { userId: true } });
+    if (!conv) throw new Error('Conversation not found');
+    if (conv.userId !== userId) throw new Error('Unauthorized');
   }
 
   async getConversation(id: string) {
@@ -1667,8 +1684,25 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
 
   async uploadAvatar(imageBase64: string, userId: string): Promise<{ success: boolean; avatarUrl?: string; error?: string }> {
     try {
+      if (!userId) return { success: false, error: 'userId required' };
+      // Validate base64 size (max 5MB raw ≈ 6.7MB base64)
+      if (imageBase64.length > 7 * 1024 * 1024) {
+        return { success: false, error: 'Image too large (max 5MB)' };
+      }
       const buffer = Buffer.from(imageBase64, 'base64');
-      const fakeFile = { buffer, mimetype: 'image/jpeg', originalname: 'selfie.jpg' } as Express.Multer.File;
+      if (buffer.length > 5 * 1024 * 1024) {
+        return { success: false, error: 'Image too large (max 5MB)' };
+      }
+      // Validate image magic bytes (JPEG: FFD8FF, PNG: 89504E47)
+      const header = buffer.slice(0, 4);
+      const isJpeg = header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF;
+      const isPng = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47;
+      const isWebp = buffer.slice(8, 12).toString() === 'WEBP';
+      if (!isJpeg && !isPng && !isWebp) {
+        return { success: false, error: 'Invalid image format. Only JPEG, PNG, WebP allowed.' };
+      }
+      const mimetype = isJpeg ? 'image/jpeg' : isPng ? 'image/png' : 'image/webp';
+      const fakeFile = { buffer, mimetype, originalname: 'selfie.jpg' } as Express.Multer.File;
       const result = await this.cloudinaryService.uploadImage(fakeFile, 'avatars');
       await this.prisma.user.update({ where: { id: userId }, data: { avatar: result.url } });
       return { success: true, avatarUrl: result.url };

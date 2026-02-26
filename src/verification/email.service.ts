@@ -72,7 +72,7 @@ export class EmailVerificationService {
     // Log code in development
     const isDev = this.configService.get('NODE_ENV') === 'development';
     if (isDev) {
-      this.logger.log(`[DEV] Email verification code for ${normalizedEmail}: ${code}`);
+      this.logger.log(`[DEV] Email verification code for ${normalizedEmail.slice(0, 3)}***@${normalizedEmail.split('@')[1]}: ${code}`);
     }
 
     return {

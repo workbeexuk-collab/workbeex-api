@@ -19,9 +19,23 @@ async function bootstrap() {
   // Global prefix
   app.setGlobalPrefix('api/v1');
 
-  // CORS - allow all origins for now (can be restricted later)
+  // CORS - restricted to trusted origins
+  const allowedOrigins = [
+    frontendUrl,
+    'https://workbeex.com',
+    'https://www.workbeex.com',
+    'https://sandbox.workbeex.com',
+    'https://workbeex-frontend-946349187944.europe-west1.run.app',
+    ...(process.env.NODE_ENV === 'development' ? ['http://localhost:3001', 'http://localhost:3000'] : []),
+  ];
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept-Language'],

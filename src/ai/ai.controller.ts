@@ -117,20 +117,23 @@ export class AiController {
 
   @Public()
   @Get('conversations/:id')
-  async getConversation(@Param('id') id: string) {
+  async getConversation(@Param('id') id: string, @Query('userId') userId: string) {
+    await this.aiService.verifyConversationOwnership(id, userId);
     return this.aiService.getConversation(id);
   }
 
   @Public()
   @Delete('conversations/:id')
-  async deleteConversation(@Param('id') id: string) {
+  async deleteConversation(@Param('id') id: string, @Query('userId') userId: string) {
+    await this.aiService.verifyConversationOwnership(id, userId);
     await this.aiService.deleteConversation(id);
     return { success: true };
   }
 
   @Public()
   @Patch('conversations/:id')
-  async renameConversation(@Param('id') id: string, @Body() body: { title: string }) {
+  async renameConversation(@Param('id') id: string, @Body() body: { title: string; userId: string }) {
+    await this.aiService.verifyConversationOwnership(id, body.userId);
     await this.aiService.renameConversation(id, body.title);
     return { success: true };
   }

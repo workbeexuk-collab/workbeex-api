@@ -128,8 +128,11 @@ export class PhoneService {
     // In production, send SMS via Twilio:
     // await this.sendSMS(formattedPhone, `Your NextBee verification code is: ${code}`);
 
-    // For development, log the code
-    this.logger.log(`[DEV] Verification code for ${formattedPhone}: ${code}`);
+    // For development, log the code (redacted)
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      this.logger.log(`[DEV] Verification code for ${formattedPhone.slice(0, -4)}****: ${code}`);
+    }
 
     return {
       success: true,
