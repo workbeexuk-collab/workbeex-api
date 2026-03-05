@@ -206,7 +206,7 @@ const toolDeclarations = [
         firstName: { type: GenAIType.STRING, description: 'Min 2 characters' },
         lastName: { type: GenAIType.STRING, description: 'Min 2 characters' },
         email: { type: GenAIType.STRING, description: 'Valid email address' },
-        password: { type: GenAIType.STRING, description: 'Min 4 characters' },
+        password: { type: GenAIType.STRING, description: 'Min 8 characters, must contain uppercase, lowercase and number. If user provides weak password, tell them the requirements and ask again.' },
         phone: { type: GenAIType.STRING, description: 'Optional phone number' },
         userType: { type: GenAIType.STRING, enum: ['CUSTOMER', 'PROVIDER'], description: 'Default CUSTOMER' },
       },
@@ -419,7 +419,7 @@ CRITICAL: ALWAYS call tools when you have enough info. Do NOT just chat — take
 - create_job: title + description minimum. Fill smart defaults. After success → suggest search_candidates
 - apply_job: needs jobId from results. Auto-generate cover letter from conversation context
 - search_candidates: call after create_job success, or when employer asks for candidates
-- register_user: collect info conversationally, NEVER redirect to signup page
+- register_user: collect info conversationally, NEVER redirect to signup page. Password MUST be min 8 chars with uppercase+lowercase+number. If user gives weak password like "123456", do NOT call the tool — tell them requirements and ask again.
 - create_provider_profile: bio + at least 1 service slug required. Auto-generate bio from conversation. After success → suggest upload_avatar
 - navigate_user: ONLY for page navigation, NEVER for provider profiles
 - upload_avatar: call after save_cv_data success
@@ -432,8 +432,10 @@ CRITICAL: ALWAYS call tools when you have enough info. Do NOT just chat — take
 CRITICAL: You CAN and MUST register users through chat. NEVER say "register on the website" or "I can't register you".
 If user is NOT logged in (loggedIn=false) and needs an account (to see providers, apply for jobs, save CV, etc.):
 1. IMMEDIATELY start collecting info: "Hesap oluşturalım! Adınız ve soyadınız ne?" / "Let's create your account! What's your first and last name?"
-2. Collect: firstName, lastName → then email, password (ask 1-2 fields at a time, be natural)
-3. Call register_user tool with the collected info
+2. Collect: firstName, lastName → then email → then password (ask 1-2 fields at a time, be natural)
+   PASSWORD RULES: Min 8 characters, must contain at least 1 uppercase letter, 1 lowercase letter, and 1 number. Example: "Abc12345"
+   When asking for password, ALWAYS mention these requirements. If user gives a weak password, do NOT call register_user — ask again with requirements.
+3. Call register_user tool with the collected info. If it returns error, tell the user the EXACT error and ask them to fix it.
 4. After success → IMMEDIATELY continue original task (search providers, save CV, apply job, etc.)
 IMPORTANT: If user says "kayıt et", "kayıt ol", "register", "sign up", "bilgilerimi vereyim" → START registration flow immediately.
 NEVER redirect to signup page. NEVER say you can't register. You HAVE the register_user tool — USE IT.
@@ -540,8 +542,10 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
       };
     } catch (error: any) {
       this.logger.error('register_user error:', error);
-      const msg = error?.message || 'Registration failed';
-      return { registered: false, error: msg };
+      const msg = error?.response?.message || error?.message || 'Registration failed';
+      const errors = error?.response?.errors || error?.response?.message;
+      const detail = Array.isArray(errors) ? errors.join(', ') : (typeof errors === 'string' ? errors : msg);
+      return { registered: false, error: detail, hint: 'Tell the user the exact error and ask them to fix it. Password must be min 8 chars with uppercase, lowercase and number.' };
     }
   }
 
@@ -1098,12 +1102,18 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
     // Create or get conversation - persist for ALL users (logged in or not)
     let convId = conversationId;
     try {
+      // Validate userId exists in DB before using as FK
+      let validUserId: string | null = null;
+      if (userId) {
+        const userExists = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+        validUserId = userExists ? userId : null;
+      }
       if (!convId) {
         const conv = await this.prisma.aiConversation.create({
-          data: { userId: userId || null, locale: locale || 'en' },
+          data: { userId: validUserId, locale: locale || 'en' },
         });
         convId = conv.id;
-        this.logger.log(`📝 New conversation created: ${convId} (user: ${userId || 'anonymous'})`);
+        this.logger.log(`📝 New conversation created: ${convId} (user: ${validUserId || 'anonymous'})`);
       }
       // Save user message to DB
       await this.prisma.aiMessage.create({
