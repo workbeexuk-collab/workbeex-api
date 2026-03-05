@@ -1648,9 +1648,20 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
         }
       }
 
+      // Generate TTS audio in parallel with DB saves (don't block response)
+      const cleanText = finalMessage.replace(/[*#_`\[\]()]/g, '').replace(/https?:\/\/\S+/g, '').trim();
+      const ttsText = cleanText.length > 250 ? cleanText.substring(0, 250) + '...' : cleanText;
+      let audio: string | null = null;
+      try {
+        audio = await this.textToSpeech(ttsText, 'Kore');
+      } catch (e) {
+        this.logger.warn('Voice TTS error:', e);
+      }
+
       return {
         transcript,
         text: finalMessage,
+        audio,
         intent: {
           sessionId: session.id,
           conversationId: convId,
@@ -1666,6 +1677,7 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
       return {
         transcript: '',
         text: fallbackMsg,
+        audio: null,
         intent: { sessionId: session.id, conversationId: convId, message: fallbackMsg, toolResults: [], locale: session.locale },
       };
     }
