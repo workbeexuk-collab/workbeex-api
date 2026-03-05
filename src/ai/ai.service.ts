@@ -1522,7 +1522,7 @@ GPS: ${userCoords ? `Available (${userCoords.lat},${userCoords.lng}). User's liv
     isLoggedIn?: boolean,
     locale?: string,
     conversationId?: string,
-  ): Promise<{ transcript: string; text: string; intent: ChatResponse }> {
+  ): Promise<{ transcript: string; text: string; audio: string | null; intent: ChatResponse }> {
     const session = this.getSession(sessionId, userId, isLoggedIn, locale);
 
     // Create/get conversation
