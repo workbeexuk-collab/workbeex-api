@@ -185,11 +185,6 @@ IMPORTANT: Keep voice responses SHORT. No more than 2-3 sentences. Be direct. Ma
           onopen: () => {
             this.logger.log(`Gemini Live session opened for ${client.id}`);
             client.emit('voice:ready');
-            // Send initial greeting prompt so Gemini speaks first
-            const greeting = locale === 'tr'
-              ? 'Merhaba! Kendini kısaca tanıt ve nasıl yardımcı olabileceğini sor.'
-              : 'Hello! Briefly introduce yourself and ask how you can help.';
-            session.sendClientContent({ turns: [{ role: 'user', parts: [{ text: greeting }] }] });
           },
           onmessage: async (message: any) => {
             // Handle different message types
@@ -270,6 +265,12 @@ IMPORTANT: Keep voice responses SHORT. No more than 2-3 sentences. Be direct. Ma
         userId: data.userId,
         isLoggedIn: data.isLoggedIn || false,
       });
+
+      // Send initial greeting so AI speaks first
+      const greeting = locale === 'tr'
+        ? 'Merhaba! Kendini kısaca tanıt ve nasıl yardımcı olabileceğini sor.'
+        : 'Hello! Briefly introduce yourself and ask how you can help.';
+      session.sendClientContent({ turns: [{ role: 'user', parts: [{ text: greeting }] }] });
 
       // Send conversation history if provided
       if (data.history?.length) {
